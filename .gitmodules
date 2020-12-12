@@ -1,0 +1,3 @@
+[submodule "dmfs"]
+	path = dmfs
+	url = https://github.com/diodesign/dmfs.git
