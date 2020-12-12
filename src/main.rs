@@ -226,7 +226,7 @@ fn main()
             manifest.add(ManifestObject::new
             (
                 ManifestObjectType::BootMsg,
-                Path::new(&target_arch).file_name().unwrap().to_str().unwrap().to_string(),
+                Path::new(&p).file_name().unwrap().to_str().unwrap().to_string(),
                 format!("Boot banner text for {} systems", target_arch),
                 load_file(&p, settings.verbose)
             ));
@@ -286,7 +286,7 @@ fn main()
                 manifest.add(ManifestObject::new
                 (
                     ManifestObjectType::SystemService,
-                    p.to_str().unwrap().to_string(),
+                    (&service_name).to_string(),
                     format!("System service {}", service_name),
                     load_file(&p, settings.verbose)
                 ));
