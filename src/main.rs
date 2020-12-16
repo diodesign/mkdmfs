@@ -17,13 +17,14 @@
  * defaults.arch = architecture to use if <target architecture> is unspecified
  * defaults.quality = build quality to use if <quality> is unspecified
  * defaults.outfile = pathname of generated image if <outfile> is unspecified
- * banners.path = pathname of the directory containing the arch-specific boot banners. <target architecture>.txt will be included, if present
+ * banners.path = pathname of the directory containing the arch-specific boot banners. <base target architecture>.txt will be included, if present
  * banners.welcome = pathname of the generic boot banner text file to be included
  * services.path = pathname of directory containing the system services
  * services.include = comma-separated list of services to include in the dmfs image from the services directory
  * 
  * All entries are ultimately optional.
  * The pathnames are relative to <manifest toml file> or found manifest.toml
+ * Base target architecture = riscv, aarch64, powerpc, etc.
  * 
  * (c) Chris Williams, 2020.
  *
@@ -41,6 +42,9 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::io::prelude::*;
 use std::fs::{read_to_string, File};
+
+extern crate regex;
+use regex::Regex;
 
 use clap::{*, App};
 use serde_derive::Deserialize;
@@ -220,16 +224,19 @@ fn main()
     {
         if let Some(target_arch) = &settings.target_arch
         {
-            let mut p = base.clone();
-            p.push(&banner_dir);
-            p.push(format!("{}.txt", target_arch));
-            manifest.add(ManifestObject::new
-            (
-                ManifestObjectType::BootMsg,
-                Path::new(&p).file_name().unwrap().to_str().unwrap().to_string(),
-                format!("Boot banner text for {} systems", target_arch),
-                load_file(&p, settings.verbose)
-            ));
+            if let Some(base_arch) = get_base_arch(&target_arch)
+            {
+                let mut p = base.clone();
+                p.push(&banner_dir);
+                p.push(format!("{}.txt", base_arch));
+                manifest.add(ManifestObject::new
+                (
+                    ManifestObjectType::BootMsg,
+                    Path::new(&p).file_name().unwrap().to_str().unwrap().to_string(),
+                    format!("Boot banner text for {} systems", base_arch),
+                    load_file(&p, settings.verbose)
+                ));
+            }
         }
     }
 
@@ -385,6 +392,19 @@ fn load_file(path: &PathBuf, verbose: bool) -> Vec<u8>
     }
 
     buffer
+}
+
+/* translate a full target architecture into a base architecture */
+fn get_base_arch(full_target: &String) -> Option<String>
+{
+    let re = Regex::new(r"(?P<arch>riscv|aarch64|arm|powerpc64|x86_64){1}").unwrap();
+    let matches = re.captures(&full_target);
+    if matches.is_none() == true
+    {
+        return None; /* unknown architecture */
+    }
+
+    Some((matches.unwrap())["arch"].to_string())
 }
 
 /* bail out with an error msg */
