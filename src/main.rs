@@ -1,4 +1,4 @@
-/* Make DMFS
+/* Make DMFS (MkDMFS)
  * 
  * Create a DMFS image file to embed in a diosix hypervisor
  * 
@@ -12,7 +12,9 @@
  * --verbose             = output progress of the build
  * 
  * mkdmfs takes its settings from the command line, and if any are omitted, it falls back
- * to its config file. the TOML-compliant manifest configuration file format:
+ * to its TOML-compliant manifest configuration file. If the location of this file isn't specified on the command line,
+ * MkDMFS searches up the host ile system tree from the current working directory for a file called manifest.toml.
+ * If no configuration file is found or supplied, MkDMFS will exit with an error. The file format is:
  * 
  * defaults.arch = architecture to use if <target architecture> is unspecified
  * defaults.quality = build quality to use if <quality> is unspecified
@@ -20,9 +22,9 @@
  * banners.path = pathname of the directory containing the arch-specific boot banners. <base target architecture>.txt will be included, if present
  * banners.welcome = pathname of the generic boot banner text file to be included
  * services.path = pathname of directory containing the system services
- * services.include = comma-separated list of services to include in the dmfs image from the services directory
+ * services.include = array of services to include in the dmfs image from the services directory
  * 
- * All entries are ultimately optional.
+ * All entries are ultimately optional, but if, eg, services.path is omitted, services.include will not be parsed.
  * The pathnames are relative to <manifest toml file> or found manifest.toml
  * Base target architecture = riscv, aarch64, powerpc, etc.
  * 
@@ -49,7 +51,7 @@ use regex::Regex;
 use clap::{*, App};
 use serde_derive::Deserialize;
 
-use dmfs::{Manifest, ManifestObject, ManifestObjectType};
+use dmfs::{Manifest, ManifestObject, ManifestObjectType, ManifestObjectData};
 
 /* define the manifest configutation TOML file */
 #[derive(Deserialize)]
@@ -79,7 +81,7 @@ struct Banners
 struct Services
 {
     path: Option<String>,
-    include: Option<String>
+    include: Option<Vec<String>>
 }
 
 /* default manifest file name */
@@ -149,7 +151,7 @@ impl Settings
         let config: Config = match toml::from_str(config_contents.as_str())
         {
             Ok(c) => c,
-            Err(e) => fatal_error(format!("Can't parse menifest configutation file {:?}: {}", config_location, e))
+            Err(e) => fatal_error(format!("Can't parse manifest configutation file {:?}: {}", config_location, e))
         };
 
         /* get the settings from the command line, or fall back to defaults in the manifest config file, if any */
@@ -195,13 +197,13 @@ impl Settings
             },
 
             /* stash our parsed toml config file */
-            config: config,
-            verbose: verbose,
+            config,
+            verbose,
 
             /* stash settings, either from the command line or the config file, or None for not specified */
-            output_filename: output_filename,
-            target_arch: target_arch,
-            quality: quality
+            output_filename,
+            target_arch,
+            quality
         }
     }
 }
@@ -234,7 +236,7 @@ fn main()
                     ManifestObjectType::BootMsg,
                     Path::new(&p).file_name().unwrap().to_str().unwrap().to_string(),
                     format!("Boot banner text for {} systems", base_arch),
-                    load_file(&p, settings.verbose)
+                    ManifestObjectData::Bytes(load_file(&p, settings.verbose))
                 ));
             }
         }
@@ -250,7 +252,7 @@ fn main()
             ManifestObjectType::BootMsg,
             Path::new(&welcome).file_name().unwrap().to_str().unwrap().to_string(),
             format!("Main boot banner text"),
-            load_file(&p, settings.verbose)
+            ManifestObjectData::Bytes(load_file(&p, settings.verbose))
         ));
     }
 
@@ -259,9 +261,7 @@ fn main()
     {
         if let Some(services) = settings.config.services.include
         {
-            /* turn comma-separated list of services into a vector of individual services */
-            let list: Vec<&str> = services.as_str().split(",").collect();
-            for service in list
+            for service in services
             {
                 /* drill down to the service's binary we want to include */
                 let mut p = base.clone();
@@ -294,8 +294,8 @@ fn main()
                 (
                     ManifestObjectType::SystemService,
                     (&service_name).to_string(),
-                    format!("System service {}", service_name),
-                    load_file(&p, settings.verbose)
+                    format!("system service {}", service_name),
+                    ManifestObjectData::Bytes(load_file(&p, settings.verbose))
                 ));
             }
         }
