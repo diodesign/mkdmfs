@@ -23,8 +23,13 @@
  * banners.welcome = pathname of the generic boot banner text file to be included
  * services.path = pathname of directory containing the system services
  * services.include = array of services to include in the dmfs image from the services directory
+ * guest.<label>.path = host file system directory containing guest kernel image <label>
+ * guest.<label>.url = URL from which to fetch the guest kernel image if it's not present
+ * guest.<label>.autostart = start running the guest at system boot up
+ * guest.<label>.description = brief description of this guest
+ * guests.<target architecture>.include = array of <label>s for guests to include in the image for the target arch
  * 
- * All entries are ultimately optional, but if, eg, services.path is omitted, services.include will not be parsed.
+ * All non-defaults entries are ultimately optional, but if, eg, services.path is omitted, services.include will not be parsed.
  * The pathnames are relative to <manifest toml file> or found manifest.toml
  * Base target architecture = riscv, aarch64, powerpc, etc.
  * 
@@ -44,6 +49,7 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::io::prelude::*;
 use std::fs::{read_to_string, File};
+use std::collections::BTreeMap;
 
 extern crate regex;
 use regex::Regex;
@@ -58,8 +64,10 @@ use dmfs::{Manifest, ManifestObject, ManifestObjectType, ManifestObjectData};
 struct Config
 {
     defaults: Defaults,
-    banners: Banners,
-    services: Services
+    banners: Option<Banners>,
+    services: Option<Services>,
+    guest: Option<BTreeMap<String, Guest>>,
+    target: Option<BTreeMap<String, Target>>
 }
 
 #[derive(Deserialize)]
@@ -82,6 +90,20 @@ struct Services
 {
     path: Option<String>,
     include: Option<Vec<String>>
+}
+
+#[derive(Deserialize)]
+struct Guest
+{
+    path: String,
+    url: Option<String>,
+    description: String   
+}
+
+#[derive(Deserialize)]
+struct Target
+{
+    guests: Option<Vec<String>>
 }
 
 /* default manifest file name */
@@ -183,7 +205,7 @@ impl Settings
             }
         };
 
-        /* this isn't defined in the toml */
+        /* this isn't defined in the toml, only at the command line */
         let verbose = opts.is_present("verbose");
 
         /* generate a structure to hold all the settings together */
@@ -221,82 +243,135 @@ fn main()
     let mut base = PathBuf::new();
     base.push(settings.config_dir);
 
-    /* start with an architecture-specific banner, if possible */
-    if let Some(banner_dir) = settings.config.banners.path
+    /* banners are optional, so none defined, don't worry */
+    if let Some(banners) = settings.config.banners
     {
-        if let Some(target_arch) = &settings.target_arch
+        /* start with an architecture-specific banner, if possible */
+        if let Some(banner_dir) = banners.path
         {
-            if let Some(base_arch) = get_base_arch(&target_arch)
+            if let Some(target_arch) = &settings.target_arch
             {
-                let mut p = base.clone();
-                p.push(&banner_dir);
-                p.push(format!("{}.txt", base_arch));
-                manifest.add(ManifestObject::new
-                (
-                    ManifestObjectType::BootMsg,
-                    Path::new(&p).file_name().unwrap().to_str().unwrap().to_string(),
-                    format!("Boot banner text for {} systems", base_arch),
-                    ManifestObjectData::Bytes(load_file(&p, settings.verbose))
-                ));
+                if let Some(base_arch) = get_base_arch(&target_arch)
+                {
+                    let mut p = base.clone();
+                    p.push(&banner_dir);
+                    p.push(format!("{}.txt", base_arch));
+                    manifest.add(ManifestObject::new
+                    (
+                        ManifestObjectType::BootMsg,
+                        Path::new(&p).file_name().unwrap().to_str().unwrap().to_string(),
+                        format!("Boot banner text for {} systems", base_arch),
+                        ManifestObjectData::Bytes(load_file(&p, settings.verbose))
+                    ));
+                }
+            }
+        }
+
+        /* next the generic welcome banner text, if defined */
+        if let Some(welcome) = banners.welcome
+        {
+            let mut p = base.clone();
+            p.push(&welcome);
+            manifest.add(ManifestObject::new
+            (
+                ManifestObjectType::BootMsg,
+                Path::new(&welcome).file_name().unwrap().to_str().unwrap().to_string(),
+                format!("Main boot banner text"),
+                ManifestObjectData::Bytes(load_file(&p, settings.verbose))
+            ));
+        }
+    }
+
+    /* include the system services, if any are defined */
+    if let Some(services) = settings.config.services
+    {
+        if let Some(services_dir) = services.path
+        {
+            if let Some(services) = services.include
+            {
+                for service in services
+                {
+                    /* drill down to the service's binary we want to include */
+                    let mut p = base.clone();
+                    p.push(&services_dir);
+                    p.push("target");
+                    
+                    /* skip the arch directory if it doesn't exist -- may mean we're self-hosting */
+                    match &settings.target_arch
+                    {
+                        Some(ta) =>
+                        {
+                            let mut test = p.clone();
+                            test.push(ta);
+                            if test.as_path().exists() == true
+                            {
+                                p.push(&ta);
+                            }
+                        },
+                        None => ()
+                    }
+
+                    if let Some(q) = &settings.quality
+                    {
+                        p.push(q);
+                        p.push(service);
+                    }
+                    let service_name = p.file_name().unwrap().to_str().unwrap();
+
+                    manifest.add(ManifestObject::new
+                    (
+                        ManifestObjectType::SystemService,
+                        (&service_name).to_string(),
+                        format!("system service {}", service_name),
+                        ManifestObjectData::Bytes(load_file(&p, settings.verbose))
+                    ));
+                }
             }
         }
     }
 
-    /* next the generic welcome banner text, if defined */
-    if let Some(welcome) = settings.config.banners.welcome
+    /* get the architecture we're generating a dmfs image for */
+    if let Some(target_arch) = &settings.target_arch
     {
-        let mut p = base.clone();
-        p.push(&welcome);
-        manifest.add(ManifestObject::new
-        (
-            ManifestObjectType::BootMsg,
-            Path::new(&welcome).file_name().unwrap().to_str().unwrap().to_string(),
-            format!("Main boot banner text"),
-            ManifestObjectData::Bytes(load_file(&p, settings.verbose))
-        ));
-    }
-
-    /* include the system services */
-    if let Some(services_dir) = settings.config.services.path
-    {
-        if let Some(services) = settings.config.services.include
+        /* get a list of supported build targets */
+        if let Some(possible_targets) = settings.config.target
         {
-            for service in services
+            /* does the target architecture have an entry in the supported targets list? */
+            if let Some(target_entry) = possible_targets.get(&target_arch.clone())
             {
-                /* drill down to the service's binary we want to include */
-                let mut p = base.clone();
-                p.push(&services_dir);
-                p.push("target");
-                
-                /* skip the arch directory if it doesn't exist -- may mean we're self-hosting */
-                match &settings.target_arch
+                /* if so, get the target sarchitecture's list of guests to include */
+                if let Some(targets_guests) = &target_entry.guests
                 {
-                    Some(ta) =>
+                    /* fetch the list of available guests */
+                    let available_guests = match settings.config.guest
                     {
-                        let mut test = p.clone();
-                        test.push(ta);
-                        if test.as_path().exists() == true
+                        Some(hashtbl) => hashtbl,
+                        None => BTreeMap::new()
+                    };
+
+                    /* and include the ones required by this target */
+                    for guest in targets_guests
+                    {
+                        match available_guests.get(&guest.clone())
                         {
-                            p.push(&ta);
+                            Some(g) =>
+                            {
+                                /* generate path name of guest image */
+                                let mut path = base.clone();
+                                path.push(&g.path);
+                                path.push(&guest);
+
+                                manifest.add(ManifestObject::new(
+                                    ManifestObjectType::GuestOS,
+                                    guest.clone(),
+                                    g.description.clone(),
+                                    ManifestObjectData::Bytes(load_file(&path, settings.verbose))
+                                ));
+                            },
+                            None => fatal_error(format!("Guest {} required by target architecture {} not defined", guest, target_arch))
                         }
-                    },
-                    None => ()
+                    }
                 }
-
-                if let Some(q) = &settings.quality
-                {
-                    p.push(q);
-                    p.push(service);
-                }
-                let service_name = p.file_name().unwrap().to_str().unwrap();
-
-                manifest.add(ManifestObject::new
-                (
-                    ManifestObjectType::SystemService,
-                    (&service_name).to_string(),
-                    format!("system service {}", service_name),
-                    ManifestObjectData::Bytes(load_file(&p, settings.verbose))
-                ));
             }
         }
     }
