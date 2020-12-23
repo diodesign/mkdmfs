@@ -45,11 +45,14 @@ extern crate serde;
 extern crate serde_derive;
 
 use std::env;
+use std::io;
+use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::process::exit;
-use std::io::prelude::*;
 use std::fs::{read_to_string, File};
 use std::collections::BTreeMap;
+
+extern crate reqwest;
 
 extern crate regex;
 use regex::Regex;
@@ -230,7 +233,9 @@ impl Settings
     }
 }
 
-fn main()
+/* asynchronous wrapping needed for reqwest'ing files from the network/internet */
+#[tokio::main]
+async fn main() -> Result<()> 
 {
     /* get our instructions from the command line. this function call
     will bail out if there's a problem with the cmd line arguments */
@@ -361,6 +366,47 @@ fn main()
                                 path.push(&g.path);
                                 path.push(&guest);
 
+                                /* if it doesn't exist, try fetching from its URL */
+                                if Path::new(&path).exists() == false
+                                {
+                                    if let Some(url) = &g.url
+                                    {
+                                        if settings.verbose == true
+                                        {
+                                            println!("Downloading guest OS {}...", &g.description);
+                                        }
+
+                                        /* fetch the guest */
+                                        let data = match reqwest::get(url).await
+                                        {
+                                            Ok(response) => response.bytes().await,
+                                            Err(e) => fatal_error(format!("Can't fetch {} for {}: {}",
+                                                        &url, &guest, e))
+                                        };
+
+                                        /* and write it to storage */
+                                        let mut fh = match File::create(&path)
+                                        {
+                                            Ok(fh) => fh,
+                                            Err(e) => fatal_error(format!("Can't create {} for {}: {}",
+                                                                    &path.to_str().unwrap(), &guest, e))
+                                        };
+
+                                        let mut slice: &[u8] = data.as_ref().unwrap();
+
+                                        if let Err(e) = io::copy(&mut slice, &mut fh)
+                                        {
+                                            fatal_error(format!("Failed to write {} for {}: {}",
+                                                &path.to_str().unwrap(), &guest, e));
+                                        }
+                                    }
+                                    else
+                                    {
+                                        /* the load_file() will fail anyway but why not handle it here */
+                                        fatal_error(format!("Can't find guest OS file {}", path.to_str().unwrap()));
+                                    }
+                                }
+
                                 manifest.add(ManifestObject::new(
                                     ManifestObjectType::GuestOS,
                                     guest.clone(),
@@ -407,6 +453,8 @@ fn main()
         },
         Err(e) => fatal_error(format!("Failed during dmfs image write to file: {}", e))
     }
+
+    Ok(())
 }
 
 /* starting in the current working directory, check for the presence of the
