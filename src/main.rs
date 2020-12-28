@@ -10,6 +10,8 @@
  * <quality>             = 'debug' to use the debug-enabled build of components, or 'release' for the release-grade builds
  * <outfile>             = pathname of the generated dmfs image file
  * --verbose             = output progress of the build
+ * --skip-downloads      = don't download any guest OSes
+ * --skip-buildroot      = don't build any guest OSes from source
  * 
  * mkdmfs takes its settings from the command line, and if any are omitted, it falls back
  * to its TOML-compliant manifest configuration file. If the location of this file isn't specified on the command line,
