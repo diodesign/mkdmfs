@@ -27,7 +27,6 @@
  * services.include = array of services to include in the dmfs image from the services directory
  * guest.<label>.path = host file system directory containing guest kernel image <label>
  * guest.<label>.url = URL from which to fetch the guest kernel image if it's not present
- * guest.<label>.autostart = start running the guest at system boot up
  * guest.<label>.description = brief description of this guest
  * guests.<target architecture>.include = array of <label>s for guests to include in the image for the target arch
  * 
@@ -102,7 +101,7 @@ struct Guest
 {
     path: String,
     url: Option<String>,
-    description: String   
+    description: String
 }
 
 #[derive(Deserialize)]
