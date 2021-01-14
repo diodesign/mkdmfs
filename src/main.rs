@@ -28,7 +28,7 @@
  * guest.<label>.path = host file system directory containing guest kernel image <label>
  * guest.<label>.url = URL from which to fetch the guest kernel image if it's not present
  * guest.<label>.description = brief description of this guest
- * guests.<target architecture>.include = array of <label>s for guests to include in the image for the target arch
+ * target.<target architecture>.guests = array of <label>s for guests to include in the image for the target arch
  * 
  * All non-defaults entries are ultimately optional, but if, eg, services.path is omitted, services.include will not be parsed.
  * The pathnames are relative to <manifest toml file> or found manifest.toml
@@ -406,6 +406,11 @@ async fn main() -> Result<()>
                                         /* the load_file() will fail anyway but why not handle it here */
                                         fatal_error(format!("Can't find guest OS file {}", path.to_str().unwrap()));
                                     }
+                                }
+
+                                if settings.verbose == true
+                                {
+                                    println!("Including guest OS {}...", &g.description);
                                 }
 
                                 manifest.add(ManifestObject::new(
