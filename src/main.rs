@@ -12,6 +12,8 @@
  * --verbose             = output progress of the build
  * --skip-downloads      = don't download any guest OSes
  * --skip-buildroot      = don't build any guest OSes from source
+ * --skip-services       = don't include any system services at all
+ * --skip-guests         = don't include guest OSes at all
  * 
  * mkdmfs takes its settings from the command line, and if any are omitted, it falls back
  * to its TOML-compliant manifest configuration file. If the location of this file isn't specified on the command line,
@@ -128,6 +130,10 @@ struct Settings
     target_arch: Option<String>,
     quality: Option<String>,
     verbose: bool,
+    no_downloads: bool,
+    // TODO: no_buildroot: bool,
+    no_services: bool,
+    no_guests: bool,
     
     /* set by the manifest configuration file */
     config: Config
@@ -148,6 +154,10 @@ impl Settings
         .arg("-q, --quality=[LEVEL] 'Set whether this is a debug or release build'")
         .arg("-o, --output=[FILE]   'Set location of generated image file'")
         .arg("-v, --verbose         'Output progress of image creation'")
+        .arg("--skip-downloads      'Don't download guest OS images'")
+        .arg("--skip-buildroot      'Don't build guest OSes using buildroot'")
+        .arg("--skip-services       'Don't include system services'")
+        .arg("--skip-guests         'Don't include guest OSes'")
         .get_matches();
 
         /* try to find the toml configuration file: first from the command line, and next by searching up through the tree */
@@ -209,8 +219,12 @@ impl Settings
             }
         };
 
-        /* this isn't defined in the toml, only at the command line */
+        /* these aren't defined in the toml, only at the command line */
         let verbose = opts.is_present("verbose");
+        let no_downloads = opts.is_present("skip-downloads");
+        // TODO: let no_buildroot = opts.is_present("skip-buildroot");
+        let no_services  = opts.is_present("skip-services");
+        let no_guests    = opts.is_present("skip-guests");
 
         /* generate a structure to hold all the settings together */
         Settings
@@ -225,6 +239,10 @@ impl Settings
             /* stash our parsed toml config file */
             config,
             verbose,
+            no_downloads,
+            // TODO: no_buildroot,
+            no_services,
+            no_guests,
 
             /* stash settings, either from the command line or the config file, or None for not specified */
             output_filename,
@@ -288,8 +306,8 @@ async fn main() -> Result<()>
         }
     }
 
-    /* include the system services, if any are defined */
-    if let Some(services) = settings.config.services
+    /* include the system services, if any are defined and if allowed */
+    if let (Some(services), false) = (settings.config.services, settings.no_services)
     {
         if let Some(services_dir) = services.path
         {
@@ -337,7 +355,7 @@ async fn main() -> Result<()>
     }
 
     /* get the architecture we're generating a dmfs image for */
-    if let Some(target_arch) = &settings.target_arch
+    if let (Some(target_arch), false) = (&settings.target_arch, settings.no_guests)
     {
         /* get a list of supported build targets */
         if let Some(possible_targets) = settings.config.target
@@ -370,7 +388,7 @@ async fn main() -> Result<()>
                                 /* if it doesn't exist, try fetching from its URL */
                                 if Path::new(&path).exists() == false
                                 {
-                                    if let Some(url) = &g.url
+                                    if let (Some(url), false) = (&g.url, settings.no_downloads)
                                     {
                                         if settings.verbose == true
                                         {
