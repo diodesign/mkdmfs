@@ -25,15 +25,22 @@
  * defaults.outfile = pathname of generated image if <outfile> is unspecified
  * banners.path = pathname of the directory containing the arch-specific boot banners. <base target architecture>.txt will be included, if present
  * banners.welcome = pathname of the generic boot banner text file to be included
- * services.path = pathname of directory containing the system services
  * services.include = array of services to include in the dmfs image from the services directory
- * guest.<label>.path = host file system directory containing guest kernel image <label>
+ * service.<name>.path = location of the service's source code directory (required)
+ * service.<name>.description = description of what this service does (required)
+ * service.<name>.properties = array of permissions and other properties granted to this service
+ * guest.<label>.path = host file system directory containing guest kernel image <label> (required)
  * guest.<label>.url = URL from which to fetch the guest kernel image if it's not present
- * guest.<label>.description = brief description of this guest
+ * guest.<label>.description = brief description of this guest (required)
  * target.<target architecture>.guests = array of <label>s for guests to include in the image for the target arch
  * 
- * All non-defaults entries are ultimately optional, but if, eg, services.path is omitted, services.include will not be parsed.
- * The pathnames are relative to <manifest toml file> or found manifest.toml
+ * Recognized properties:
+ * auto_crash_restart = restart if crashed
+ * service_console = allow it to register as console service
+ * console_write = allow it to write direct to the console
+ * console_read = allow it to read direct from the console
+ * 
+ * The pathnames are relative to <manifest toml file> or the found manifest.toml
  * Base target architecture = riscv, aarch64, powerpc, etc.
  * 
  * (c) Chris Williams, 2020.
@@ -72,6 +79,7 @@ struct Config
     defaults: Defaults,
     banners: Option<Banners>,
     services: Option<Services>,
+    service: Option<BTreeMap<String, Service>>, 
     guest: Option<BTreeMap<String, Guest>>,
     target: Option<BTreeMap<String, Target>>
 }
@@ -94,8 +102,15 @@ struct Banners
 #[derive(Deserialize)]
 struct Services
 {
-    path: Option<String>,
     include: Option<Vec<String>>
+}
+
+#[derive(Deserialize)]
+struct Service
+{
+    path: String,
+    description: String,
+    properties: Option<Vec<String>>
 }
 
 #[derive(Deserialize)]
@@ -131,7 +146,6 @@ struct Settings
     quality: Option<String>,
     verbose: bool,
     no_downloads: bool,
-    // TODO: no_buildroot: bool,
     no_services: bool,
     no_guests: bool,
     
@@ -222,7 +236,6 @@ impl Settings
         /* these aren't defined in the toml, only at the command line */
         let verbose = opts.is_present("verbose");
         let no_downloads = opts.is_present("skip-downloads");
-        // TODO: let no_buildroot = opts.is_present("skip-buildroot");
         let no_services  = opts.is_present("skip-services");
         let no_guests    = opts.is_present("skip-guests");
 
@@ -238,13 +251,12 @@ impl Settings
 
             /* stash our parsed toml config file */
             config,
-            verbose,
-            no_downloads,
-            // TODO: no_buildroot,
-            no_services,
-            no_guests,
 
             /* stash settings, either from the command line or the config file, or None for not specified */
+            verbose,
+            no_downloads,
+            no_services,
+            no_guests,
             output_filename,
             target_arch,
             quality
@@ -285,7 +297,8 @@ async fn main() -> Result<()>
                         ManifestObjectType::BootMsg,
                         Path::new(&p).file_name().unwrap().to_str().unwrap().to_string(),
                         format!("Boot banner text for {} systems", base_arch),
-                        ManifestObjectData::Bytes(load_file(&p, settings.verbose))
+                        ManifestObjectData::Bytes(load_file(&p, settings.verbose)),
+                        None
                     ));
                 }
             }
@@ -301,7 +314,8 @@ async fn main() -> Result<()>
                 ManifestObjectType::BootMsg,
                 Path::new(&welcome).file_name().unwrap().to_str().unwrap().to_string(),
                 format!("Main boot banner text"),
-                ManifestObjectData::Bytes(load_file(&p, settings.verbose))
+                ManifestObjectData::Bytes(load_file(&p, settings.verbose)),
+                None
             ));
         }
     }
@@ -309,46 +323,54 @@ async fn main() -> Result<()>
     /* include the system services, if any are defined and if allowed */
     if let (Some(services), false) = (settings.config.services, settings.no_services)
     {
-        if let Some(services_dir) = services.path
+        /* get the hashtable of defined available services */
+        if let Some(available_services) = settings.config.service
         {
-            if let Some(services) = services.include
+            /* get the list of services to include */
+            if let Some(services_to_include) = services.include
             {
-                for service in services
+                /* run through that list */
+                for service_name in services_to_include
                 {
-                    /* drill down to the service's binary we want to include */
-                    let mut p = base.clone();
-                    p.push(&services_dir);
-                    p.push("target");
-                    
-                    /* skip the arch directory if it doesn't exist -- may mean we're self-hosting */
-                    match &settings.target_arch
+                    /* look up the service from its name */
+                    if let Some(service) = available_services.get(&service_name)
                     {
-                        Some(ta) =>
+                        /* drill down to the service's binary we want to include */
+                        let mut p = base.clone();
+                        p.push(&service.path);
+                        p.push("target");
+                        
+                        /* skip the arch directory if it doesn't exist -- may mean we're self-hosting */
+                        match &settings.target_arch
                         {
-                            let mut test = p.clone();
-                            test.push(ta);
-                            if test.as_path().exists() == true
+                            Some(ta) =>
                             {
-                                p.push(&ta);
-                            }
-                        },
-                        None => ()
-                    }
+                                let mut test = p.clone();
+                                test.push(ta);
+                                if test.as_path().exists() == true
+                                {
+                                    p.push(&ta);
+                                }
+                            },
+                            None => ()
+                        }
 
-                    if let Some(q) = &settings.quality
-                    {
-                        p.push(q);
-                        p.push(service);
-                    }
-                    let service_name = p.file_name().unwrap().to_str().unwrap();
+                        /* select the appropriate debug or release build */
+                        if let Some(q) = &settings.quality
+                        {
+                            p.push(q);
+                            p.push(&service_name);
+                        }
 
-                    manifest.add(ManifestObject::new
-                    (
-                        ManifestObjectType::SystemService,
-                        (&service_name).to_string(),
-                        format!("system service {}", service_name),
-                        ManifestObjectData::Bytes(load_file(&p, settings.verbose))
-                    ));
+                        manifest.add(ManifestObject::new
+                        (
+                            ManifestObjectType::SystemService,
+                            (&service_name).to_string(),
+                            service.description.clone(),
+                            ManifestObjectData::Bytes(load_file(&p, settings.verbose)),
+                            service.properties.clone()
+                        ));
+                    }
                 }
             }
         }
@@ -435,7 +457,8 @@ async fn main() -> Result<()>
                                     ManifestObjectType::GuestOS,
                                     guest.clone(),
                                     g.description.clone(),
-                                    ManifestObjectData::Bytes(load_file(&path, settings.verbose))
+                                    ManifestObjectData::Bytes(load_file(&path, settings.verbose)),
+                                    None
                                 ));
                             },
                             None => fatal_error(format!("Guest {} required by target architecture {} not defined", guest, target_arch))
