@@ -59,7 +59,7 @@ use std::io;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::process::exit;
-use std::fs::{read_to_string, File};
+use std::fs::{read_to_string, create_dir_all, File};
 use std::collections::BTreeMap;
 
 extern crate reqwest;
@@ -405,6 +405,12 @@ async fn main() -> Result<()>
                                 /* generate path name of guest image */
                                 let mut path = base.clone();
                                 path.push(&g.path);
+                                /* make sure a directory is present to house the guest */
+                                if let Err(e) = create_dir_all(&path)
+                                {
+                                    fatal_error(format!("Can't ensure directory {} exists for guest {} ({})",
+                                        &path.to_str().unwrap(), &guest, e));
+                                }
                                 path.push(&guest);
 
                                 /* if it doesn't exist, try fetching from its URL */
