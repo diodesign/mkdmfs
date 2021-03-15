@@ -23,15 +23,21 @@
  * defaults.arch = architecture to use if <target architecture> is unspecified
  * defaults.quality = build quality to use if <quality> is unspecified
  * defaults.outfile = pathname of generated image if <outfile> is unspecified
+ * defaults.ram = number of megabytes of RAM to assign to a capsule if unspecified
+ * defaults.cpus = number of virtual CPU cores to assign to a capsule if unspecified
  * banners.path = pathname of the directory containing the arch-specific boot banners. <base target architecture>.txt will be included, if present
  * banners.welcome = pathname of the generic boot banner text file to be included
  * services.include = array of services to include in the dmfs image from the services directory
  * service.<name>.path = location of the service's source code directory (required)
  * service.<name>.description = description of what this service does (required)
  * service.<name>.properties = array of permissions and other properties granted to this service
+ * service.<name>.ram = 
+ * service.<name>.cpus = 
  * guest.<label>.path = host file system directory containing guest kernel image <label> (required)
  * guest.<label>.url = URL from which to fetch the guest kernel image if it's not present
  * guest.<label>.description = brief description of this guest (required)
+ * guest.<label>.ram = number of megabytes of RAM to allocate for this guest
+ * guest.<label>.cpus = number of virtual CPU cores to allocate for this guest
  * target.<target architecture>.guests = array of <label>s for guests to include in the image for the target arch
  * 
  * Recognized properties:
