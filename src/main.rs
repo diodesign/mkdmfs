@@ -66,7 +66,7 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::fs::{read_to_string, create_dir_all, File};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 extern crate reqwest;
 
@@ -85,9 +85,9 @@ struct Config
     defaults: Defaults,
     banners: Option<Banners>,
     services: Option<Services>,
-    service: Option<BTreeMap<String, Service>>, 
-    guest: Option<BTreeMap<String, Guest>>,
-    target: Option<BTreeMap<String, Target>>
+    service: Option<HashMap<String, Service>>, 
+    guest: Option<HashMap<String, Guest>>,
+    target: Option<HashMap<String, Target>>
 }
 
 #[derive(Deserialize)]
@@ -169,15 +169,16 @@ impl Settings
         .version(crate_version!())
         .author(crate_authors!())
         .about("Create DMFS images from a collection of files")
-        .arg("-m, --manifest=[FILE] 'Sets location of manifest config file'")
-        .arg("-t, --target=[ARCH]   'Sets architecture of target system'")
-        .arg("-q, --quality=[LEVEL] 'Set whether this is a debug or release build'")
-        .arg("-o, --output=[FILE]   'Set location of generated image file'")
-        .arg("-v, --verbose         'Output progress of image creation'")
-        .arg("--skip-downloads      'Don't download guest OS images'")
-        .arg("--skip-buildroot      'Don't build guest OSes using buildroot'")
-        .arg("--skip-services       'Don't include system services'")
-        .arg("--skip-guests         'Don't include guest OSes'")
+        .args_from_usage("
+            -m, --manifest=[FILE] 'Sets location of manifest config file'
+            -t, --target=[ARCH]   'Sets architecture of target system'
+            -q, --quality=[LEVEL] 'Set whether this is a debug or release build'
+            -o, --output=[FILE]   'Set location of generated image file'
+            -v, --verbose         'Output progress of image creation'
+            --skip-downloads      'Don't download guest OS images'
+            --skip-buildroot      'Don't build guest OSes using buildroot'
+            --skip-services       'Don't include system services'
+            --skip-guests         'Don't include guest OSes'")
         .get_matches();
 
         /* try to find the toml configuration file: first from the command line, and next by searching up through the tree */
@@ -398,7 +399,7 @@ async fn main() -> Result<()>
                     let available_guests = match settings.config.guest
                     {
                         Some(hashtbl) => hashtbl,
-                        None => BTreeMap::new()
+                        None => HashMap::new()
                     };
 
                     /* and include the ones required by this target */
@@ -593,6 +594,6 @@ fn get_base_arch(full_target: &String) -> Option<String>
 fn fatal_error(msg: String) -> !
 {
     /* ignores the verbose setting */
-    println!("mkdmfs error: {}", msg);
+    eprintln!("mkdmfs error: {}", msg);
     exit(1);
 }
